@@ -365,29 +365,35 @@ func ResolveCallbackReference(ctx context.Context, callbackName string) (any, er
 	return nil, fmt.Errorf("callback '%s' not found", callbackName)
 }
 
-// ResolveAgentReference builds an agent from a reference config.
-func ResolveAgentReference(ctx context.Context, parentPath, refPath string) (agent.Agent, error) {
+// resolveContainedConfigPath resolves refPath against the directory holding
+// parentPath and returns the absolute result, rejecting references that escape
+// that directory.
+//
+// Every config reference naming another file on disk must go through this
+// helper, before the file is read and before any cache is consulted. A config
+// file is only as trustworthy as whoever supplied it, and the directory of the
+// referencing config is the boundary the loader promises to stay inside.
+//
+// Absolute references are rejected outright. Relative ones are made absolute on
+// both sides before comparing, and symlinks are resolved where the paths exist,
+// so a symlink inside the agent directory cannot be used to escape it.
+func resolveContainedConfigPath(parentPath, refPath string) (string, error) {
 	if refPath == "" {
-		return nil, fmt.Errorf("agent reference path cannot be empty")
+		return "", fmt.Errorf("config reference path cannot be empty")
 	}
 
 	if filepath.IsAbs(refPath) {
-		return nil, fmt.Errorf("absolute paths are not allowed in AgentTool config_path: %s", refPath)
+		return "", fmt.Errorf("absolute paths are not allowed in config_path: %s", refPath)
 	}
 
-	targetPath := filepath.Join(filepath.Dir(parentPath), refPath)
-
-	absPath, err := filepath.Abs(targetPath)
+	absPath, err := filepath.Abs(filepath.Join(filepath.Dir(parentPath), refPath))
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve absolute path: %w", err)
+		return "", fmt.Errorf("failed to resolve absolute path: %w", err)
 	}
 
-	// Prevent path traversal outside the parent agent's directory. Both sides are
-	// made absolute before comparing, and symlinks are resolved where the paths
-	// exist, so a symlink inside the agent directory cannot be used to escape it.
 	parentDir, err := filepath.Abs(filepath.Dir(parentPath))
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve agent directory: %w", err)
+		return "", fmt.Errorf("failed to resolve agent directory: %w", err)
 	}
 	if resolved, err := filepath.EvalSymlinks(parentDir); err == nil {
 		parentDir = resolved
@@ -397,8 +403,18 @@ func ResolveAgentReference(ctx context.Context, parentPath, refPath string) (age
 		checkPath = resolved
 	}
 	if !strings.HasPrefix(checkPath, parentDir+string(os.PathSeparator)) && checkPath != parentDir {
-		return nil, fmt.Errorf(
+		return "", fmt.Errorf(
 			"path traversal detected: config_path %q resolves outside agent directory", refPath)
+	}
+
+	return absPath, nil
+}
+
+// ResolveAgentReference builds an agent from a reference config.
+func ResolveAgentReference(ctx context.Context, parentPath, refPath string) (agent.Agent, error) {
+	absPath, err := resolveContainedConfigPath(parentPath, refPath)
+	if err != nil {
+		return nil, err
 	}
 
 	registryMu.RLock()
