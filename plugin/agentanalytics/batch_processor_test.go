@@ -52,13 +52,21 @@ func (m *mockStream) Send(req *storagepb.AppendRowsRequest) error {
 	return m.sendErr
 }
 
+// maxMockRecv bounds how many times Recv answers without a terminal error. The
+// drain loop in append stops only on a non-nil error, so a mock that answers
+// forever would spin instead of failing the test.
+const maxMockRecv = 1000
+
 func (m *mockStream) Recv() (*storagepb.AppendRowsResponse, error) {
 	n := atomic.AddInt32(&m.recvCount, 1)
 	if i := int(n) - 1; i < len(m.recvSeq) {
 		return m.recvSeq[i].res, m.recvSeq[i].err
 	}
+	if m.recvErr == nil && int(n) > maxMockRecv {
+		return nil, fmt.Errorf("mockStream.Recv called %d times with no terminal error set", n)
+	}
 	if m.recvRes == nil && m.recvErr == nil {
-		// The drain loop in append stops only on a non-nil error.
+		// No result configured: the stream has already ended.
 		return nil, io.EOF
 	}
 	return m.recvRes, m.recvErr
@@ -298,6 +306,7 @@ func TestStreamWriter_SendError(t *testing.T) {
 		sendErr       error
 		recvErr       error
 		recvSeq       []mockRecv
+		wantHasStatus bool
 		wantCode      codes.Code
 		wantErrMsg    string
 		wantRecvCount int32
@@ -306,6 +315,7 @@ func TestStreamWriter_SendError(t *testing.T) {
 			name:          "server-side termination reports the status from Recv",
 			sendErr:       io.EOF,
 			recvErr:       grpcstatus.Error(codes.Unavailable, "the connection is draining"),
+			wantHasStatus: true,
 			wantCode:      codes.Unavailable,
 			wantErrMsg:    "the connection is draining",
 			wantRecvCount: 1,
@@ -315,6 +325,7 @@ func TestStreamWriter_SendError(t *testing.T) {
 			sendErr:       io.EOF,
 			recvSeq:       []mockRecv{{res: &storagepb.AppendRowsResponse{}}},
 			recvErr:       grpcstatus.Error(codes.ResourceExhausted, "Exceeds 'AppendRows throughput' quota"),
+			wantHasStatus: true,
 			wantCode:      codes.ResourceExhausted,
 			wantErrMsg:    "AppendRows throughput",
 			wantRecvCount: 2,
@@ -365,7 +376,14 @@ func TestStreamWriter_SendError(t *testing.T) {
 			if got := atomic.LoadInt32(&mStream.recvCount); got != tt.wantRecvCount {
 				t.Errorf("Recv called %d times, want %d", got, tt.wantRecvCount)
 			}
-			if st, _ := grpcstatus.FromError(err); st.Code() != tt.wantCode {
+			if bp.streamWriter.stream != nil {
+				t.Errorf("streamWriter.stream = %T, want nil", bp.streamWriter.stream)
+			}
+			st, ok := grpcstatus.FromError(err)
+			if ok != tt.wantHasStatus {
+				t.Errorf("gRPC status present = %v, want %v (err: %v)", ok, tt.wantHasStatus, err)
+			}
+			if st.Code() != tt.wantCode {
 				t.Errorf("status code = %v, want %v (err: %v)", st.Code(), tt.wantCode, err)
 			}
 			if !strings.Contains(err.Error(), tt.wantErrMsg) {
