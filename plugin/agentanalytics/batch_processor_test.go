@@ -25,9 +25,9 @@ import (
 	"time"
 
 	storagepb "cloud.google.com/go/bigquery/storage/apiv1/storagepb"
-	status "google.golang.org/genproto/googleapis/rpc/status"
+	statuspb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
-	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/grpc/status"
 )
 
 // mockStream implements the unexported stream interface in streamWriter
@@ -133,7 +133,7 @@ func TestBatchProcessor_WriteBatchErrors(t *testing.T) {
 			name: "BigQuery append error",
 			recvRes: &storagepb.AppendRowsResponse{
 				Response: &storagepb.AppendRowsResponse_Error{
-					Error: &status.Status{
+					Error: &statuspb.Status{
 						Message: "some append error",
 					},
 				},
@@ -314,7 +314,7 @@ func TestStreamWriter_SendError(t *testing.T) {
 		{
 			name:          "server-side termination reports the status from Recv",
 			sendErr:       io.EOF,
-			recvErr:       grpcstatus.Error(codes.Unavailable, "the connection is draining"),
+			recvErr:       status.Error(codes.Unavailable, "the connection is draining"),
 			wantHasStatus: true,
 			wantCode:      codes.Unavailable,
 			wantErrMsg:    "the connection is draining",
@@ -324,7 +324,7 @@ func TestStreamWriter_SendError(t *testing.T) {
 			name:          "a buffered response is drained before the status surfaces",
 			sendErr:       io.EOF,
 			recvSeq:       []mockRecv{{res: &storagepb.AppendRowsResponse{}}},
-			recvErr:       grpcstatus.Error(codes.ResourceExhausted, "Exceeds 'AppendRows throughput' quota"),
+			recvErr:       status.Error(codes.ResourceExhausted, "Exceeds 'AppendRows throughput' quota"),
 			wantHasStatus: true,
 			wantCode:      codes.ResourceExhausted,
 			wantErrMsg:    "AppendRows throughput",
@@ -379,7 +379,7 @@ func TestStreamWriter_SendError(t *testing.T) {
 			if bp.streamWriter.stream != nil {
 				t.Errorf("streamWriter.stream = %T, want nil", bp.streamWriter.stream)
 			}
-			st, ok := grpcstatus.FromError(err)
+			st, ok := status.FromError(err)
 			if ok != tt.wantHasStatus {
 				t.Errorf("gRPC status present = %v, want %v (err: %v)", ok, tt.wantHasStatus, err)
 			}
