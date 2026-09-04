@@ -331,7 +331,7 @@ func TestStreamWriter_SendError(t *testing.T) {
 			wantRecvCount: 2,
 		},
 		{
-			name:          "server-side termination without a status still drains the stream",
+			name:          "a termination without a status is drained exactly once",
 			sendErr:       io.EOF,
 			recvErr:       io.EOF,
 			wantCode:      codes.Unknown,
