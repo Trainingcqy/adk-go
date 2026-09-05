@@ -41,7 +41,9 @@ type mockStream struct {
 }
 
 // mockRecv is one scripted Recv result; recvSeq supplies them in order before
-// mockStream falls back to recvRes/recvErr.
+// mockStream falls back to recvRes/recvErr. Set one of the two fields: a zero
+// value answers (nil, nil), which append and writeBatch report as a success
+// when it answers the Recv after a successful Send.
 type mockRecv struct {
 	res *storagepb.AppendRowsResponse
 	err error
@@ -321,20 +323,23 @@ func TestStreamWriter_SendError(t *testing.T) {
 			wantRecvCount: 1,
 		},
 		{
-			name:          "a buffered response is drained before the status surfaces",
-			sendErr:       io.EOF,
-			recvSeq:       []mockRecv{{res: &storagepb.AppendRowsResponse{}}},
+			name:    "buffered responses are drained until the status surfaces",
+			sendErr: io.EOF,
+			recvSeq: []mockRecv{
+				{res: &storagepb.AppendRowsResponse{}},
+				{res: &storagepb.AppendRowsResponse{}},
+				{res: &storagepb.AppendRowsResponse{}},
+			},
 			recvErr:       status.Error(codes.ResourceExhausted, "Exceeds 'AppendRows throughput' quota"),
 			wantHasStatus: true,
 			wantCode:      codes.ResourceExhausted,
 			wantErrMsg:    "AppendRows throughput",
-			wantRecvCount: 2,
+			wantRecvCount: 4,
 		},
 		{
 			name:          "a termination without a status is drained exactly once",
 			sendErr:       io.EOF,
 			recvErr:       io.EOF,
-			wantCode:      codes.Unknown,
 			wantErrMsg:    "EOF",
 			wantRecvCount: 1,
 		},
@@ -342,14 +347,12 @@ func TestStreamWriter_SendError(t *testing.T) {
 			name:          "a wrapped io.EOF still drains and keeps its context",
 			sendErr:       fmt.Errorf("send aborted: %w", io.EOF),
 			recvErr:       io.EOF,
-			wantCode:      codes.Unknown,
 			wantErrMsg:    "send aborted",
 			wantRecvCount: 1,
 		},
 		{
 			name:          "client-side error is reported as is",
 			sendErr:       errors.New("send failed"),
-			wantCode:      codes.Unknown,
 			wantErrMsg:    "send failed",
 			wantRecvCount: 0,
 		},
@@ -372,6 +375,12 @@ func TestStreamWriter_SendError(t *testing.T) {
 			if err == nil {
 				t.Fatalf("writeBatch: expected an error, got nil")
 			}
+			if !strings.Contains(err.Error(), "max retries exceeded") {
+				t.Errorf("error %q lost the retry-exhaustion wrapper", err.Error())
+			}
+			if !strings.Contains(err.Error(), "failed to send row batch") {
+				t.Errorf("error %q lost the send-error wrapper", err.Error())
+			}
 
 			if got := atomic.LoadInt32(&mStream.recvCount); got != tt.wantRecvCount {
 				t.Errorf("Recv called %d times, want %d", got, tt.wantRecvCount)
@@ -383,7 +392,7 @@ func TestStreamWriter_SendError(t *testing.T) {
 			if ok != tt.wantHasStatus {
 				t.Errorf("gRPC status present = %v, want %v (err: %v)", ok, tt.wantHasStatus, err)
 			}
-			if st.Code() != tt.wantCode {
+			if tt.wantHasStatus && st.Code() != tt.wantCode {
 				t.Errorf("status code = %v, want %v (err: %v)", st.Code(), tt.wantCode, err)
 			}
 			if !strings.Contains(err.Error(), tt.wantErrMsg) {
