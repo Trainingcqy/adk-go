@@ -873,8 +873,8 @@ func shouldExcludeEvent(ev *session.Event) bool {
 	}
 	for _, p := range c.Parts {
 		// adk-python rejects a null part when decoding a request or building
-		// Content, but here a nil part can already be in the session, from a REST
-		// request or an SDK caller.
+		// Content, but here a nil part can already be in the session, for
+		// example from an SDK caller.
 		if p == nil {
 			continue
 		}
