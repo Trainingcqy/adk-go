@@ -760,6 +760,9 @@ func TestEventGraphHandlerSkipsNilParts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := graph(t, []*genai.Part{nil, tc.part})
 			want := graph(t, []*genai.Part{tc.part})
+			if want == graph(t, []*genai.Part{{Text: "no call"}}) {
+				t.Fatalf("graph for %s does not highlight the tool", tc.name)
+			}
 			if got != want {
 				t.Errorf("body with a leading nil part =\n%s\nwant\n%s", got, want)
 			}
