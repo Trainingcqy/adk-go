@@ -707,17 +707,24 @@ func (s *recordingLiveSession) Send(req agent.LiveRequest) error {
 
 func TestRunner_RunLive_SendDropsNilParts(t *testing.T) {
 	text := &genai.Part{Text: "hi"}
+	text2 := &genai.Part{Text: "there"}
 	funcResp := &genai.Part{FunctionResponse: &genai.FunctionResponse{Name: "book_flight"}}
+	blob := &genai.Blob{MIMEType: "audio/pcm", Data: []byte{0x00, 0x01}}
 	for _, tc := range []struct {
-		name      string
-		parts     []*genai.Part
-		wantParts []*genai.Part
-		wantSaved bool
+		name          string
+		parts         []*genai.Part
+		realtimeInput any
+		wantParts     []*genai.Part
+		wantSaved     bool
+		wantNoCopy    bool
 	}{
 		{name: "nil before text", parts: []*genai.Part{nil, text}, wantParts: []*genai.Part{text}, wantSaved: true},
 		{name: "nil after text", parts: []*genai.Part{text, nil}, wantParts: []*genai.Part{text}, wantSaved: true},
+		{name: "nil between texts", parts: []*genai.Part{text, nil, text2}, wantParts: []*genai.Part{text, text2}, wantSaved: true},
 		{name: "nil after function response", parts: []*genai.Part{funcResp, nil}, wantParts: []*genai.Part{funcResp}},
 		{name: "only nil", parts: []*genai.Part{nil, nil}},
+		{name: "nil with realtime input", parts: []*genai.Part{nil, text}, realtimeInput: blob, wantParts: []*genai.Part{text}, wantSaved: true},
+		{name: "no nil", parts: []*genai.Part{text}, wantParts: []*genai.Part{text}, wantSaved: true, wantNoCopy: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const sessionID = "testSessionNilParts"
@@ -749,7 +756,7 @@ func TestRunner_RunLive_SendDropsNilParts(t *testing.T) {
 			}
 
 			content := &genai.Content{Role: genai.RoleUser, Parts: slices.Clone(tc.parts)}
-			if err := sess.Send(agent.LiveRequest{Content: content}); err != nil {
+			if err := sess.Send(agent.LiveRequest{Content: content, RealtimeInput: tc.realtimeInput}); err != nil {
 				t.Fatalf("Send() error = %v", err)
 			}
 			if !slices.Equal(content.Parts, tc.parts) {
@@ -761,6 +768,12 @@ func TestRunner_RunLive_SendDropsNilParts(t *testing.T) {
 			}
 			if diff := cmp.Diff(want, agentSess.requests[0].Content, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("forwarded content mismatch (-want +got):\n%s", diff)
+			}
+			if agentSess.requests[0].RealtimeInput != tc.realtimeInput {
+				t.Errorf("forwarded RealtimeInput = %T, want %T", agentSess.requests[0].RealtimeInput, tc.realtimeInput)
+			}
+			if tc.wantNoCopy && agentSess.requests[0].Content != content {
+				t.Error("Send() copied a request without nil parts")
 			}
 			events := getRunLiveTestEvents(t, sessionService, sessionID)
 			if !tc.wantSaved {
