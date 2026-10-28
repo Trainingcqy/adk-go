@@ -85,7 +85,7 @@ func (p *loggingPlugin) log(msg string) {
 }
 
 func (p *loggingPlugin) formatContent(content *genai.Content, maxLength int) string {
-	if content == nil || len(content.Parts) == 0 {
+	if content == nil {
 		return "None"
 	}
 
@@ -109,6 +109,9 @@ func (p *loggingPlugin) formatContent(content *genai.Content, maxLength int) str
 		} else {
 			parts = append(parts, "other_part")
 		}
+	}
+	if len(parts) == 0 {
+		return "None"
 	}
 	return strings.Join(parts, " | ")
 }

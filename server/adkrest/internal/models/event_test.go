@@ -110,6 +110,7 @@ func TestEventMarshalJSONWithNilParts(t *testing.T) {
 		want  string
 	}{
 		{"nil_before_text", []*genai.Part{nil, {Text: "THY"}}, `{"role":"user","parts":[{"text":"THY"}]}`},
+		{"nil_before_function_call", []*genai.Part{nil, {FunctionCall: &genai.FunctionCall{Name: "f"}}}, `{"role":"user","parts":[{"functionCall":{"name":"f","args":{}}}]}`},
 		{"only_nil_omits_parts", []*genai.Part{nil}, `{"role":"user"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
