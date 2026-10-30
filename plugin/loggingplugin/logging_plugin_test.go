@@ -29,6 +29,7 @@ func TestFormatContentSkipsNilParts(t *testing.T) {
 	}{
 		{"nil_before_text", []*genai.Part{nil, {Text: "THY"}}, "text: 'THY'"},
 		{"only_nil", []*genai.Part{nil}, "None"},
+		{"no_parts", []*genai.Part{}, "None"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			content := &genai.Content{Parts: tc.parts}
